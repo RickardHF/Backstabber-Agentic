@@ -73,6 +73,13 @@ export interface Item extends GameObject {
   spriteIndex: number; // Index in the sprite sheet
 }
 
+// Chat message for the prompt CLI overlay
+export interface Msg {
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  ts: number;
+}
+
 // Generic collision object interface for collision detection system
 export interface CollisionObject {
   id: string;

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Player, Box, Item, PlayerEffect, AIManagerConfig } from './game/types';
-import { drawGrid, drawAiVisionCone, drawPlayer, drawBox, drawPlayerDeath, rayBoxIntersection, startFrameTiming, drawTileMap, drawItem } from './game/rendering';
+import { Player, Box, Item, PlayerEffect, AIManagerConfig, Msg } from './game/types';
+import { drawGrid, drawAiVisionCone, drawPlayer, drawBox, drawPlayerDeath, rayBoxIntersection, startFrameTiming, drawTileMap, drawItem, drawPromptNPC } from './game/rendering';
 import { updatePlayer, isPlayerBehindAI } from './game/HumanPlayer';
 import { checkAiVision } from './game/AIPlayer';
 import { AIManager } from './game/AIManager';
@@ -9,7 +9,9 @@ import { useIsMobile } from './game/useIsMobile';
 import { useFullscreen } from './game/useFullscreen';
 import { useOrientation } from './game/useOrientation';
 import { generateMapLayout, getUserSpawnPoint, loadMapFromTiled, hasTiledMapLoaded, getTiledMapBoxes, MAP_CONFIG } from './game/MapLayout';
+import { createPromptNPC, isPlayerInRange, PromptNPC } from './game/PromptNPC';
 import { debugSpriteLoading } from '../utils/debugSprites';
+import PromptModal from './PromptModal';
 
 interface GameProps {
   onExitToMenu?: () => void;
@@ -85,10 +87,22 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
   
   // Track defeated enemies for scoring
   const [defeatedEnemies, setDefeatedEnemies] = useState<number>(0);
-  
+
+  // Prompt economy + CLI overlay state
+  const [credits, setCredits] = useState<number>(0);
+  const [promptOpen, setPromptOpen] = useState<boolean>(false);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [promptInFlight, setPromptInFlight] = useState<boolean>(false);
+  const [npc, setNpc] = useState<PromptNPC>(() => createPromptNPC());
+  const [npcInRange, setNpcInRange] = useState<boolean>(false);
+  const promptOpenRef = useRef<boolean>(false);
+  useEffect(() => { promptOpenRef.current = promptOpen; }, [promptOpen]);
+  const npcRef = useRef<PromptNPC>(npc);
+  useEffect(() => { npcRef.current = npc; }, [npc]);
+
   // Track active effects for UI display
   const [activeEffects, setActiveEffects] = useState<PlayerEffect[]>([]);
-  
+
   // Game state management
   const [gameActive, setGameActive] = useState<boolean>(true);
   
@@ -131,6 +145,7 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
         if (dist < player.size + aiPlayer.size + 5) {
           aiManagerRef.current.markAIDead(aiPlayer.id);
           setDefeatedEnemies(prev => prev + 1);
+          setCredits(prev => prev + 1);
           break;
         }
       } else if (aiVision && isPlayerBehindAI(player, aiPlayer, aiVision)) {
@@ -169,6 +184,7 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
         
         // Add to the defeated enemies count
         setDefeatedEnemies(prev => prev + 1);
+        setCredits(prev => prev + 1);
         break;
       }
     }
@@ -243,6 +259,16 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
     
     // Reset the score when restarting the game
     setDefeatedEnemies(0);
+    setCredits(0);
+    setMessages([]);
+    setPromptInFlight(false);
+    setPromptOpen(false);
+    setNpc(createPromptNPC());
+    fetch('/api/prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reset: true }),
+    }).catch(() => {});
     
     // Clear and re-initialize the AI Manager to prevent immediate collision
     if (aiManagerRef.current) {
@@ -333,6 +359,7 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
         setBoxes(walls);
         const spawn = getUserSpawnPoint();
         setPlayer(prev => ({ ...prev, x: spawn.x, y: spawn.y }));
+        setNpc(createPromptNPC());
         if (typeof window !== 'undefined') {
           (window as unknown as { MAP_CONFIG?: typeof MAP_CONFIG }).MAP_CONFIG = MAP_CONFIG;
         }
@@ -418,13 +445,16 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
   // Handle key events
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // While the prompt modal owns input, the global game keyboard handler is dormant.
+      if (promptOpenRef.current) return;
+
       setKeysPressed((prev: { [key: string]: boolean }) => ({ ...prev, [e.key.toLowerCase()]: true }));
-      
+
       // Check for space bar
       if (e.key === ' ' || e.code === 'Space') {
         // Prevent default space bar behavior (page scrolling)
         e.preventDefault();
-        
+
   if (player.isDead && deathAnimation.overlayReady) {
           // If player is dead and animation is complete, restart the game
           resetGame();
@@ -432,12 +462,22 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
           // Otherwise try to attack if not dead
           tryAttack();
         }
+        return;
+      }
+
+      // 'E' opens the prompt modal when player is near the Toasty Llama.
+      if (e.key.toLowerCase() === 'e' && !player.isDead) {
+        if (isPlayerInRange(playerRef.current, npcRef.current)) {
+          e.preventDefault();
+          setPromptOpen(true);
+        }
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (promptOpenRef.current) return;
       setKeysPressed((prev: { [key: string]: boolean }) => ({ ...prev, [e.key.toLowerCase()]: false }));
-      
+
       // Prevent default for spacebar on keyup as well
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
@@ -458,6 +498,55 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
       aiManagerRef.current.updateConfig(aiManagerConfig);
     }
   }, [aiManagerConfig]);
+
+  // Pause the game while the prompt modal is open
+  useEffect(() => {
+    if (promptOpen) {
+      setGameActive(false);
+    } else if (!player.isDead) {
+      setGameActive(true);
+    }
+  }, [promptOpen, player.isDead]);
+
+  // Track whether the player is in range of the NPC (for the Press-E hint).
+  useEffect(() => {
+    setNpcInRange(isPlayerInRange(player, npc));
+  }, [player.x, player.y, npc.x, npc.y, npc.interactRadius, player.size, player, npc]);
+
+  // Submit a prompt to the /api/prompt route
+  const handlePromptSubmit = useCallback(async (text: string) => {
+    if (promptInFlight || credits <= 0 || !text.trim()) return;
+    const ts = Date.now();
+    setMessages(prev => [...prev, { role: 'user', text, ts }]);
+    setCredits(c => c - 1);
+    setPromptInFlight(true);
+    setNpc(prev => ({ ...prev, isWorking: true }));
+    try {
+      const res = await fetch('/api/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: text }),
+      });
+      const data: { response?: string; error?: string } = await res.json();
+      if (!res.ok) {
+        const errText = data?.error || `Request failed (${res.status})`;
+        setMessages(prev => [...prev, { role: 'system', text: errText, ts: Date.now() }]);
+      } else {
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', text: data.response || '(no response)', ts: Date.now() },
+        ]);
+      }
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'system', text: `Network error: ${(err as Error).message}`, ts: Date.now() },
+      ]);
+    } finally {
+      setPromptInFlight(false);
+      setNpc(prev => ({ ...prev, isWorking: false }));
+    }
+  }, [credits, promptInFlight]);
 
   // Render the game (memoized to avoid recreating in effects unless deps change)
   const renderGame = useCallback(() => {
@@ -509,6 +598,8 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
   boxesRef.current.forEach(box => { drawBox(offCtx, box); });
     // Draw items
   itemsRef.current.forEach(item => { drawItem(offCtx, item); });
+    // Draw the Toasty Llama NPC in the world layer
+    drawPromptNPC(offCtx, npcRef.current, performance.now());
     const aiPlayers = aiManagerRef.current?.getAIPlayers() || [];
     aiPlayers.forEach(aiPlayer => {
       const aiVision = aiManagerRef.current?.getAIVision(aiPlayer.id);
@@ -640,6 +731,8 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
       ctx.save();
       ctx.translate(-cameraX, -cameraY);
   drawPlayer(ctx, p);
+      // Redraw the NPC over the vision mask so it's visible even outside the cone
+      drawPromptNPC(ctx, npcRef.current, performance.now());
       ctx.restore();
       if (graceActive) {
         ctx.beginPath();
@@ -848,6 +941,10 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
             <span className="opacity-70">DEFEATED</span>
             <span className="hud-counter text-sm">{defeatedEnemies}</span>
           </div>
+          <div className="flex items-center gap-2 font-pixel text-[10px] tracking-wide">
+            <span className="opacity-70">CREDITS</span>
+            <span className="hud-counter text-sm">{credits}</span>
+          </div>
           {isMobile && fullscreen.isSupported && (
             <button
               onClick={handleFullscreenToggle}
@@ -887,6 +984,11 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
             SHIELD
           </div>
         )}
+        {npcInRange && !player.isDead && !promptOpen && (
+          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 hud-counter bg-black/70 px-3 py-1 text-[#ffd66b]">
+            Press &apos;E&apos; to Prompt
+          </div>
+        )}
   {player.isDead && deathAnimation.overlayReady && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75">
             <h2 className="game-title text-5xl text-[var(--accent-glow)] mb-4 drop-shadow-[0_0_12px_rgba(255,77,57,0.5)]">Fallen</h2>
@@ -909,6 +1011,15 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
             </div>
             <p className="font-pixel text-[10px] mt-5 opacity-60">Press SPACE to restart</p>
           </div>        )}
+        {promptOpen && (
+          <PromptModal
+            messages={messages}
+            credits={credits}
+            inFlight={promptInFlight}
+            onSubmit={handlePromptSubmit}
+            onClose={() => setPromptOpen(false)}
+          />
+        )}
         {/* Active Effects Status Bar */}
         {activeEffects.length > 0 && !player.isDead && (
           <div className="absolute top-2 left-1/2 transform -translate-x-1/2 flex gap-4">

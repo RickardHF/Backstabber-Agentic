@@ -1,4 +1,5 @@
 import { Player, Box, Item } from './types';
+import type { PromptNPC } from './PromptNPC';
 import { directionColors, aiDirectionColors } from './constants';
 import { 
   CharacterSprite, 
@@ -201,6 +202,84 @@ export const drawItem = (ctx: CanvasRenderingContext2D, item: Item) => {
     sx, sy, spriteSize, spriteSize,
     item.x - item.size / 2, item.y - item.size / 2 + bobOffset, item.size, item.size
   );
+};
+
+// Draws the Toasty Llama prompt NPC. Blinks when isWorking (a prompt is in flight).
+export const drawPromptNPC = (
+  ctx: CanvasRenderingContext2D,
+  npc: PromptNPC,
+  timeMs: number
+) => {
+  const blink = npc.isWorking ? 0.55 + 0.45 * Math.sin(timeMs * 0.012) : 1;
+
+  ctx.save();
+  ctx.globalAlpha = blink;
+
+  // Idle bob
+  const bob = Math.sin(timeMs * 0.003) * 2;
+  const cx = npc.x;
+  const cy = npc.y + bob;
+  const r = npc.size;
+
+  // Soft golden glow so the NPC stands out
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.2);
+  glow.addColorStop(0, 'rgba(255, 210, 120, 0.55)');
+  glow.addColorStop(1, 'rgba(255, 210, 120, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle = '#d9c290';
+  ctx.strokeStyle = '#5a4a2a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Ears (simple triangles)
+  ctx.fillStyle = '#bda472';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.55, cy - r * 0.7);
+  ctx.lineTo(cx - r * 0.25, cy - r * 1.1);
+  ctx.lineTo(cx - r * 0.1, cy - r * 0.65);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx + r * 0.55, cy - r * 0.7);
+  ctx.lineTo(cx + r * 0.25, cy - r * 1.1);
+  ctx.lineTo(cx + r * 0.1, cy - r * 0.65);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Eyes
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, cy - r * 0.05, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.3, cy - r * 0.05, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Mouth
+  ctx.strokeStyle = '#5a4a2a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.25, r * 0.18, 0, Math.PI);
+  ctx.stroke();
+
+  // Label
+  ctx.globalAlpha = 1;
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#3a2a14';
+  ctx.textAlign = 'center';
+  ctx.fillText('Toasty', cx, cy + r + 12);
+
+  ctx.restore();
 };
 
 // Function to check if a ray intersects with a box and returns the distance to intersection
