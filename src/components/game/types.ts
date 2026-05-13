@@ -74,9 +74,20 @@ export interface Item extends GameObject {
 }
 
 // Chat message for the prompt CLI overlay
+export interface ToolStep {
+  toolCallId: string;
+  name: string;
+  args: string;
+  status: 'running' | 'done';
+  error?: string;
+}
+
 export interface Msg {
   role: 'user' | 'assistant' | 'system';
   text: string;
+  reasoning?: string;
+  tools?: ToolStep[];
+  done?: boolean;
   ts: number;
 }
 

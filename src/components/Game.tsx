@@ -513,35 +513,125 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
     setNpcInRange(isPlayerInRange(player, npc));
   }, [player.x, player.y, npc.x, npc.y, npc.interactRadius, player.size, player, npc]);
 
-  // Submit a prompt to the /api/prompt route
+  // Submit a prompt to the /api/prompt route (streams events back via SSE).
   const handlePromptSubmit = useCallback(async (text: string) => {
     if (promptInFlight || credits <= 0 || !text.trim()) return;
     const ts = Date.now();
-    setMessages(prev => [...prev, { role: 'user', text, ts }]);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', text, ts },
+      { role: 'assistant', text: '', reasoning: '', tools: [], done: false, ts: ts + 1 },
+    ]);
     setCredits(c => c - 1);
     setPromptInFlight(true);
     setNpc(prev => ({ ...prev, isWorking: true }));
+
+    const updateAssistant = (mut: (m: Msg) => Msg) => {
+      setMessages(prev => {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'assistant' && !prev[i].done) {
+            const next = prev.slice();
+            next[i] = mut(next[i]);
+            return next;
+          }
+        }
+        return prev;
+      });
+    };
+
+    const pushSystem = (errText: string) => {
+      setMessages(prev => [...prev, { role: 'system', text: errText, ts: Date.now() }]);
+    };
+
     try {
       const res = await fetch('/api/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: text }),
       });
-      const data: { response?: string; error?: string } = await res.json();
-      if (!res.ok) {
-        const errText = data?.error || `Request failed (${res.status})`;
-        setMessages(prev => [...prev, { role: 'system', text: errText, ts: Date.now() }]);
-      } else {
-        setMessages(prev => [
-          ...prev,
-          { role: 'assistant', text: data.response || '(no response)', ts: Date.now() },
-        ]);
+
+      if (!res.ok || !res.body) {
+        let errText = `Request failed (${res.status})`;
+        try {
+          const data = await res.json();
+          if (data?.error) errText = data.error;
+        } catch { /* not JSON */ }
+        pushSystem(errText);
+        updateAssistant(m => ({ ...m, done: true }));
+        return;
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6);
+          if (!payload) continue;
+          let evt: { type: string; [k: string]: unknown };
+          try {
+            evt = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          switch (evt.type) {
+            case 'reasoning_delta':
+              updateAssistant(m => ({ ...m, reasoning: (m.reasoning || '') + (evt.text as string || '') }));
+              break;
+            case 'reasoning':
+              updateAssistant(m => ({ ...m, reasoning: (evt.text as string) || m.reasoning || '' }));
+              break;
+            case 'text_delta':
+              updateAssistant(m => ({ ...m, text: m.text + (evt.text as string || '') }));
+              break;
+            case 'text':
+              updateAssistant(m => ({ ...m, text: (evt.text as string) || m.text }));
+              break;
+            case 'tool_start':
+              updateAssistant(m => ({
+                ...m,
+                tools: [
+                  ...(m.tools || []),
+                  {
+                    toolCallId: String(evt.toolCallId),
+                    name: String(evt.name || 'tool'),
+                    args: String(evt.args || ''),
+                    status: 'running',
+                  },
+                ],
+              }));
+              break;
+            case 'tool_done':
+              updateAssistant(m => ({
+                ...m,
+                tools: (m.tools || []).map(t =>
+                  t.toolCallId === evt.toolCallId
+                    ? { ...t, status: 'done', error: evt.error ? String(evt.error) : undefined }
+                    : t
+                ),
+              }));
+              break;
+            case 'error':
+              pushSystem(String(evt.message || 'Unknown error'));
+              updateAssistant(m => ({ ...m, done: true }));
+              break;
+            case 'done':
+              updateAssistant(m => ({ ...m, done: true }));
+              break;
+          }
+        }
+      }
+      updateAssistant(m => ({ ...m, done: true }));
     } catch (err) {
-      setMessages(prev => [
-        ...prev,
-        { role: 'system', text: `Network error: ${(err as Error).message}`, ts: Date.now() },
-      ]);
+      pushSystem(`Network error: ${(err as Error).message}`);
+      updateAssistant(m => ({ ...m, done: true }));
     } finally {
       setPromptInFlight(false);
       setNpc(prev => ({ ...prev, isWorking: false }));
