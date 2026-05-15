@@ -1,6 +1,24 @@
 # Backstabber
 
-A top-down 2D stealth game built with Next.js, React, and HTML Canvas. Sneak up on enemies, strike from the shadows, and survive the arena.
+A top-down 2D stealth game built with Next.js, React, and HTML Canvas — with a twist: **the game itself can be rewritten while you play it**, powered by an in-game AI coding agent.
+
+Kill enemies to earn credits, spend them at an NPC to prompt an AI agent that can read and edit the game's source code in real time. Change the rules, add features, break things — all without leaving the arena.
+
+## ⚡ In-Game AI Agent
+
+Backstabber embeds a fully functional AI coding agent inside the game loop. An NPC called **Toasty Llama** sits near your spawn point. Walk up, press interact, and a terminal-style chat overlay opens — backed by the [GitHub Copilot SDK](https://github.com/github/copilot-sdk) (`@github/copilot-sdk`).
+
+**How it works:**
+- Every enemy you backstab earns **1 credit**.
+- Each prompt to the agent costs **1 credit** — so you have to _play_ to _code_.
+- The agent runs a full Copilot session with tool use: it can read files, run commands, and edit source code in the project's working directory.
+- Streaming responses, reasoning traces, and tool-call progress are all visible in the overlay in real time.
+
+**What can you do with it?** Anything the SDK supports — ask it to tweak enemy speed, add a new item type, change the map, refactor a module, or explain how the vision-cone math works. The session persists across prompts, so you can iterate.
+
+**Point it at any project.** Set `COPILOT_WORKING_DIR` to a different repo and the agent operates there instead. Backstabber becomes a gamified front-end for AI-assisted coding on whatever codebase you choose.
+
+> This is a reference implementation showing how to integrate the Copilot SDK into a Next.js app — streaming events, tool-call visualization, session management, and a credit-gated economy — all in ~200 lines (`api/prompt/route.ts` + `PromptModal.tsx`).
 
 ## Story
 
@@ -13,8 +31,7 @@ You are **Cedric Bearsbane**, trapped by the Norse gods in a chamber between the
 - **Items** — Defeated enemies drop items:
   - **Speed Potion** (~80% drop) — Temporary speed boost.
   - **Emerald Inferno** (~20% drop) — Temporarily allows killing enemies from any direction.
-- **Credits** — Each kill earns a credit, which can be spent at the Prompt NPC.
-- **Prompt NPC** — Interact with "Toasty Llama" near spawn to open an AI chat powered by the [GitHub Copilot SDK](https://github.com/github/copilot-sdk).
+- **Credits** — Each kill earns a credit, spendable at the Prompt NPC.
 
 ## Controls
 
@@ -64,12 +81,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Environment Variables (optional)
+### Environment Variables
+
+All optional — the game runs fine without them; the Prompt NPC simply won't connect.
 
 | Variable | Description |
 |---|---|
-| `GH_TOKEN` / `GITHUB_TOKEN` | GitHub token for the Copilot SDK Prompt NPC |
-| `COPILOT_WORKING_DIR` | Working directory for Copilot sessions |
+| `GH_TOKEN` or `GITHUB_TOKEN` | A GitHub token with Copilot access. Only needed if you want the in-game AI agent to work. Falls back gracefully if missing. |
+| `COPILOT_WORKING_DIR` | Absolute path to the directory the agent should operate in. Defaults to the project root. Set this to point the agent at a different codebase entirely. |
 
 ## Tech Stack
 
