@@ -788,6 +788,32 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
                 rayLength = Math.min(rayLength, extendedDistance);
               }
             }
+
+            // Check intersection with the Toasty Llama NPC so it occludes + reveals
+            // the same way other actors do. The visual sprite extends above the
+            // body position; use a tall bounding box so the cone reveals the head
+            // and ears when the body is hit.
+            {
+              const npcCenterY = npcRef.current.y - npcRef.current.size * 0.6;
+              const npcBox: Box = {
+                id: 'npc-vision',
+                x: npcRef.current.x,
+                y: npcCenterY,
+                width: npcRef.current.size * 2.4,
+                height: npcRef.current.size * 3.4,
+                color: 'unused',
+                direction: 'none',
+                speed: 0,
+                size: npcRef.current.size,
+                pulse: 0,
+                rotation: 0,
+                rotationSpeed: 0,
+              };
+              const dist = rayBoxIntersection(p.x, p.y, dirX, dirY, npcBox);
+              if (dist !== null && dist < rayLength) {
+                rayLength = Math.min(rayLength, dist + 40);
+              }
+            }
             
             const endX = p.x + dirX * rayLength;
             const endY = p.y + dirY * rayLength;
@@ -821,8 +847,6 @@ const Game: React.FC<GameProps> = ({ onExitToMenu }) => {
       ctx.save();
       ctx.translate(-cameraX, -cameraY);
   drawPlayer(ctx, p);
-      // Redraw the NPC over the vision mask so it's visible even outside the cone
-      drawPromptNPC(ctx, npcRef.current, performance.now());
       ctx.restore();
       if (graceActive) {
         ctx.beginPath();

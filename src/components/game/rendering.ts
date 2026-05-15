@@ -204,80 +204,191 @@ export const drawItem = (ctx: CanvasRenderingContext2D, item: Item) => {
   );
 };
 
-// Draws the Toasty Llama prompt NPC. Blinks when isWorking (a prompt is in flight).
+// Draws the Toasty Llama prompt NPC — side-view silhouette facing left
+// (toward the player's spawn). Blinks when isWorking (a prompt is in flight).
 export const drawPromptNPC = (
   ctx: CanvasRenderingContext2D,
   npc: PromptNPC,
   timeMs: number
 ) => {
-  const blink = npc.isWorking ? 0.55 + 0.45 * Math.sin(timeMs * 0.012) : 1;
+  const working = npc.isWorking;
+  const blink = working ? 0.6 + 0.4 * Math.sin(timeMs * 0.012) : 1;
 
   ctx.save();
   ctx.globalAlpha = blink;
 
   // Idle bob
-  const bob = Math.sin(timeMs * 0.003) * 2;
+  const bob = Math.sin(timeMs * 0.003) * 1.5;
   const cx = npc.x;
   const cy = npc.y + bob;
-  const r = npc.size;
+  const s = npc.size / 22; // scale factor — drawing is tuned for size=22
 
-  // Soft golden glow so the NPC stands out
-  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.2);
+  const wool = '#e8d4a2';
+  const woolShade = '#c2a472';
+  const skin = '#b8966a';
+  const hoof = '#3a2a18';
+  const outline = '#4a3520';
+  const eye = '#1a1a1a';
+  const eyeShine = '#ffffff';
+
+  // Soft glow halo so the NPC pops against the floor tiles
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, npc.size * 2.4);
   glow.addColorStop(0, 'rgba(255, 210, 120, 0.55)');
   glow.addColorStop(1, 'rgba(255, 210, 120, 0)');
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2);
+  ctx.arc(cx, cy, npc.size * 2.4, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body
-  ctx.fillStyle = '#d9c290';
-  ctx.strokeStyle = '#5a4a2a';
-  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 1.5 * s;
+  ctx.strokeStyle = outline;
+
+  // --- Legs (front pair drawn first so back pair overlays correctly) ---
+  const legTop = cy + 6 * s;
+  const legBottom = cy + 18 * s;
+  const drawLeg = (lx: number) => {
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.rect(lx - 2 * s, legTop, 4 * s, legBottom - legTop);
+    ctx.fill();
+    ctx.stroke();
+    // hoof
+    ctx.fillStyle = hoof;
+    ctx.fillRect(lx - 2.4 * s, legBottom - 2.4 * s, 4.8 * s, 2.4 * s);
+  };
+  drawLeg(cx - 11 * s); // front-left
+  drawLeg(cx + 9 * s);  // back-left
+  drawLeg(cx - 5 * s);  // front-right (slightly offset)
+  drawLeg(cx + 15 * s); // back-right
+
+  // --- Body (wooly oval) ---
+  ctx.fillStyle = wool;
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.ellipse(cx + 2 * s, cy + 4 * s, 18 * s, 11 * s, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // Ears (simple triangles)
-  ctx.fillStyle = '#bda472';
+  // Wool bumps along the back
+  ctx.fillStyle = wool;
+  for (let i = 0; i < 5; i++) {
+    const bx = cx - 10 * s + i * 6 * s;
+    const by = cy - 4 * s;
+    ctx.beginPath();
+    ctx.arc(bx, by, 4 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Subtle belly shading
+  ctx.fillStyle = woolShade;
+  ctx.globalAlpha = 0.35 * blink;
   ctx.beginPath();
-  ctx.moveTo(cx - r * 0.55, cy - r * 0.7);
-  ctx.lineTo(cx - r * 0.25, cy - r * 1.1);
-  ctx.lineTo(cx - r * 0.1, cy - r * 0.65);
+  ctx.ellipse(cx + 2 * s, cy + 10 * s, 14 * s, 4 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = blink;
+
+  // --- Tail ---
+  ctx.fillStyle = wool;
+  ctx.beginPath();
+  ctx.arc(cx + 19 * s, cy + 1 * s, 4 * s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // --- Neck (trapezoid going up-left) ---
+  ctx.fillStyle = wool;
+  ctx.beginPath();
+  ctx.moveTo(cx - 8 * s, cy - 2 * s);
+  ctx.lineTo(cx + 2 * s, cy - 4 * s);
+  ctx.lineTo(cx - 5 * s, cy - 18 * s);
+  ctx.lineTo(cx - 13 * s, cy - 15 * s);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+
+  // --- Head ---
+  ctx.fillStyle = wool;
   ctx.beginPath();
-  ctx.moveTo(cx + r * 0.55, cy - r * 0.7);
-  ctx.lineTo(cx + r * 0.25, cy - r * 1.1);
-  ctx.lineTo(cx + r * 0.1, cy - r * 0.65);
+  ctx.ellipse(cx - 13 * s, cy - 19 * s, 8 * s, 6 * s, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // --- Snout (skin-colored, sticking forward toward the player) ---
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.ellipse(cx - 20 * s, cy - 17 * s, 5.5 * s, 3.8 * s, -0.18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // --- Ears (two tall triangles on top of head) ---
+  ctx.fillStyle = wool;
+  // back ear
+  ctx.beginPath();
+  ctx.moveTo(cx - 9 * s, cy - 24 * s);
+  ctx.lineTo(cx - 6 * s, cy - 31 * s);
+  ctx.lineTo(cx - 4 * s, cy - 23 * s);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-
-  // Eyes
-  ctx.fillStyle = '#1a1a1a';
+  // front ear
   ctx.beginPath();
-  ctx.arc(cx - r * 0.3, cy - r * 0.05, r * 0.12, 0, Math.PI * 2);
+  ctx.moveTo(cx - 15 * s, cy - 23 * s);
+  ctx.lineTo(cx - 14 * s, cy - 32 * s);
+  ctx.lineTo(cx - 10 * s, cy - 24 * s);
+  ctx.closePath();
   ctx.fill();
+  ctx.stroke();
+  // pink ear inner (front)
+  ctx.fillStyle = '#d99a82';
+  ctx.globalAlpha = 0.6 * blink;
   ctx.beginPath();
-  ctx.arc(cx + r * 0.3, cy - r * 0.05, r * 0.12, 0, Math.PI * 2);
+  ctx.moveTo(cx - 13.5 * s, cy - 25 * s);
+  ctx.lineTo(cx - 13 * s, cy - 30 * s);
+  ctx.lineTo(cx - 11 * s, cy - 25 * s);
+  ctx.closePath();
   ctx.fill();
+  ctx.globalAlpha = blink;
 
-  // Mouth
-  ctx.strokeStyle = '#5a4a2a';
-  ctx.lineWidth = 1.5;
+  // --- Eye ---
+  // closed-eye look while working — a little "..." vibe; otherwise open
+  if (working && Math.sin(timeMs * 0.015) < -0.6) {
+    // blinked
+    ctx.strokeStyle = eye;
+    ctx.lineWidth = 1.2 * s;
+    ctx.beginPath();
+    ctx.moveTo(cx - 15 * s, cy - 19 * s);
+    ctx.lineTo(cx - 12 * s, cy - 19 * s);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = eye;
+    ctx.beginPath();
+    ctx.arc(cx - 13.5 * s, cy - 19.5 * s, 1.4 * s, 0, Math.PI * 2);
+    ctx.fill();
+    // shine
+    ctx.fillStyle = eyeShine;
+    ctx.beginPath();
+    ctx.arc(cx - 14 * s, cy - 20 * s, 0.5 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- Nostril + mouth on the snout ---
+  ctx.fillStyle = eye;
   ctx.beginPath();
-  ctx.arc(cx, cy + r * 0.25, r * 0.18, 0, Math.PI);
+  ctx.arc(cx - 23 * s, cy - 17 * s, 0.7 * s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 1 * s;
+  ctx.beginPath();
+  ctx.arc(cx - 20 * s, cy - 15 * s, 1.6 * s, 0.1, Math.PI - 0.1);
   ctx.stroke();
 
-  // Label
+  // --- Label ---
   ctx.globalAlpha = 1;
-  ctx.font = '10px monospace';
+  ctx.font = `bold ${10 * s}px monospace`;
   ctx.fillStyle = '#3a2a14';
   ctx.textAlign = 'center';
-  ctx.fillText('Toasty', cx, cy + r + 12);
+  ctx.fillText('Toasty', cx, cy + npc.size + 14 * s);
 
   ctx.restore();
 };
